@@ -43,13 +43,48 @@ Các bước mình dùng: copy ảnh, chuyển ROI sang `int16`, cộng `delta`,
 
 Điểm cần nhớ: `.astype(np.int16)` ở đây tạo mảng mới. Nếu chỉ sửa `roi` mà quên ghi lại vào `result`, ảnh trả về sẽ chưa được chỉnh sáng.
 
-### Phần mới đọc, chưa tự làm bài
+### Mask và broadcasting
 
 - Boolean mask chọn pixel theo điều kiện. Mask có shape `(H, W)`, kết hợp điều kiện bằng `&` và bọc từng điều kiện trong ngoặc.
 - `image[mask]` lấy ra mảng `(N, C)` với N pixel được chọn, không giữ bố cục ảnh. Đọc bằng boolean indexing tạo bản sao, còn `image[mask] = ...` ghi trực tiếp vào ảnh.
 - Broadcasting cho phép gán một bộ ba màu vào cả vùng ảnh hoặc nhân từng kênh với một hệ số riêng.
 
-Buổi sau tiếp tục thực hành mask và broadcasting, rồi học HSV và `cv2.inRange` để tách màu.
+## Ngày 2 - 08/09/2026
+
+Hôm nay học tiếp từ mask đến pipeline tách vùng và đếm vật thể. Mình đã học xong mask, broadcasting, HSV, histogram, threshold, lọc ảnh, morphology và contour.
+
+### Những điểm cần nhớ
+
+- Mask chọn pixel theo điều kiện, ROI chọn vùng theo tọa độ. `mask[..., None]` thêm chiều kênh để nhân mask `(H, W, 1)` với ảnh `(H, W, 3)`.
+- HSV tách sắc màu, độ bão hòa và mức sáng. Với ảnh `uint8` chuyển bằng `COLOR_BGR2HSV`, H nằm trong 0-179, S và V trong 0-255. Màu đỏ nằm ở hai đầu vòng H nên thường cần ghép hai khoảng.
+- `cv2.inRange` trả mask 0/255. Đếm pixel được chọn bằng `np.count_nonzero`, không lấy tổng giá trị mask làm số pixel.
+- Histogram đếm số pixel ở từng mức sáng, không lưu vị trí của chúng. Hai ảnh khác nhau vẫn có thể có cùng histogram.
+- Threshold cố định dùng một ngưỡng mình chọn. Otsu tự chọn một ngưỡng chung từ histogram. Adaptive threshold tính ngưỡng cục bộ, hữu ích khi ánh sáng không đều.
+- Mean lấy trung bình, Gaussian dùng trọng số ưu tiên gần tâm, median lấy trung vị. Lọc mạnh có thể xóa cả chi tiết lỗi nhỏ, không chỉ nhiễu.
+- Erosion co vùng trắng, dilation nở vùng trắng. Opening là erosion rồi dilation; closing là dilation rồi erosion. Phải biết vùng nào cần giữ trước khi làm sạch mask.
+- Contour biểu diễn đường bao bằng các điểm. `RETR_EXTERNAL` lấy biên ngoài; `boundingRect` trả `(x, y, w, h)` để vẽ khung hoặc cắt ROI.
+- Diện tích contour là diện tích hình học, không nhất thiết bằng số pixel trắng. Đếm contour cũng không mặc nhiên là đếm đúng vật thể ngoài đời.
+
+### Bài đã làm
+
+**[practice.py](practice.py)**: tạo mask có hai hình chữ nhật và một vùng nhiễu nhỏ, tìm contour, lọc diện tích và vẽ bounding box. Kết quả giữ lại 2 vùng.
+
+**[exercise_03.py](exercise_03.py)**: tạo hai vật thể tối trên nền sáng, thêm nhiễu rồi chạy pipeline:
+
+```text
+Ảnh grayscale -> Otsu đảo -> Opening -> Contour -> Lọc diện tích -> Đếm vùng
+```
+
+Thử thêm một cầu nối giữa hai vật thể để so sánh:
+
+```text
+separate: 2 vung
+connected: 1 vung
+```
+
+Điểm mình rút ra: hai vật thể nối nhau thành một vùng trắng thì contour ngoài chỉ còn một. Khi đếm sai, cần xem mask trước. Tăng kernel để phá cầu nối cũng có thể phá mất chi tiết cần giữ.
+
+Tối học tiếp Sobel và Canny.
 
 ## Chạy bài
 
@@ -58,9 +93,11 @@ Môi trường hiện tại: Python 3.12, NumPy và OpenCV. Chạy từ thư m�
 ```powershell
 python -m pip install numpy opencv-python
 python exercise_01.py
+python practice.py
+python exercise_03.py
 ```
 
-Lệnh trên tạo `exercise_01.png`. Bài 2 hiện chỉ định nghĩa hàm, có thể thử bằng:
+Các bài tạo ảnh PNG trong thư mục đang chạy: bài 1 tạo `exercise_01.png`, bài contour tạo `contours.png`, bài 3 tạo các ảnh `separate_*` và `connected_*` để so sánh từng bước. Bài 2 hiện chỉ định nghĩa hàm, có thể thử bằng:
 
 ```python
 import numpy as np
