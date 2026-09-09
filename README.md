@@ -84,7 +84,77 @@ connected: 1 vung
 
 Điểm mình rút ra: hai vật thể nối nhau thành một vùng trắng thì contour ngoài chỉ còn một. Khi đếm sai, cần xem mask trước. Tăng kernel để phá cầu nối cũng có thể phá mất chi tiết cần giữ.
 
-Tối học tiếp Sobel và Canny.
+### Sobel, Canny và kiểm tra lý thuyết
+
+Đã học xong Sobel và Canny, sau đó làm bài kiểm tra lý thuyết hai ngày đầu.
+
+- Sobel đo gradient: Gx đo thay đổi theo chiều ngang nên phản ứng mạnh với biên đứng. Dùng kiểu như `float32` để giữ gradient âm và giá trị lớn hơn 255.
+- Canny làm mảnh biên và dùng hai ngưỡng gradient. Biên yếu chỉ được giữ khi nối được với biên mạnh qua các ứng viên phù hợp.
+- Biên có thể đến từ bóng đổ, chữ in hoặc texture; ảnh Canny chưa phải mask đặc của vật thể.
+- Qua bài kiểm tra, mình cần giải thích kỹ hơn cơ chế broadcasting và sự khác nhau giữa diện tích contour với số pixel trắng.
+- Tăng ngưỡng diện tích chỉ giữ hoặc loại contour, không tách một contour thành hai. Muốn đếm hai vật thể đang nối nhau trong pipeline hiện tại, phải xử lý vùng nối trước.
+
+## Ngày 3 - 09/09/2026
+
+Hôm nay học về dữ liệu, đánh giá mô hình và ôn lại cơ chế training. Trước đó mình từng làm bài nhận diện chữ số, tự định nghĩa model và training loop; lần này học lại để nối các khái niệm với bài toán kiểm lỗi.
+
+### Dữ liệu và nhãn
+
+- Classification gán nhãn toàn ảnh; detection dùng box; segmentation gán nhãn từng pixel. Multiclass chọn một lớp, multilabel cho phép nhiều nhãn cùng lúc.
+- Anomaly detection học đặc điểm bình thường để tìm khác biệt. Khác thường chưa chắc là lỗi; vẫn cần dữ liệu có nhãn để đánh giá.
+- Chia train/validation/test theo đơn vị cần tổng quát: sản phẩm, video, lô hoặc thời gian. Không random các frame gần giống nhau vào nhiều tập.
+- Train dùng cập nhật trọng số; validation dùng chọn cấu hình, checkpoint và ngưỡng; test đánh giá phương án đã chốt.
+- Chia tập trước augmentation. Nếu tự tính mean/std, chỉ tính từ train. Ảnh gần trùng hoặc patch cùng sản phẩm không nên lọt giữa các tập khi đánh giá trên sản phẩm mới.
+
+### Metric và ngưỡng quyết định
+
+Quy ước positive là sản phẩm lỗi: TP là phát hiện đúng lỗi, FP là báo nhầm hàng tốt, FN là bỏ sót lỗi, TN là nhận đúng hàng tốt.
+
+```text
+Precision = TP / (TP + FP)
+Recall = TP / (TP + FN)
+F1 = 2 * precision * recall / (precision + recall)
+```
+
+- Accuracy cao vẫn có thể bỏ sót toàn bộ lỗi khi dữ liệu mất cân bằng.
+- Thay ngưỡng chỉ đổi cách chuyển score thành nhãn, không làm trọng số học tốt hơn. Hạ ngưỡng không làm recall giảm trên cùng dữ liệu và score cố định, nhưng precision không nhất thiết giảm ở mọi bước.
+- PR curve cho thấy precision và recall qua nhiều ngưỡng. F1 cao nhất chưa chắc đáp ứng chi phí vận hành tốt nhất.
+- Chọn ngưỡng bằng validation rồi mới đánh giá test. Luôn xem số mẫu lỗi thực tế, không chỉ phần trăm.
+
+### Overfitting và mất cân bằng
+
+- Train loss giảm nhưng validation loss tăng là dấu hiệu cần kiểm tra overfitting; khoảng cách cũng có thể do lệch dữ liệu hoặc tiền xử lý sai.
+- Early stopping theo dõi tiêu chí validation và lưu checkpoint tốt nhất, không mặc định lấy epoch cuối.
+- Oversampling tăng tần suất gặp lớp lỗi; undersampling giảm mẫu lớp nhiều; weighted loss tăng đóng góp của lớp cần ưu tiên. Lặp ảnh không tạo thêm thông tin mới.
+- Không mặc định cân bằng validation/test như batch train. Precision phụ thuộc tỷ lệ lỗi trong dữ liệu sử dụng.
+
+### Tiền xử lý và augmentation
+
+- Phân biệt chia 255 với chuẩn hóa `(x - mean) / std`. Sau chuẩn hóa, giá trị âm hoặc lớn hơn 1 là bình thường.
+- Train và API phải khớp thứ tự kênh, kích thước, thang giá trị và mean/std. Với pretrained model, theo cấu hình tiền xử lý của trọng số.
+- Resize quá nhỏ có thể làm mất vết xước. Có thể cân nhắc ROI hoặc patch nhưng phải giữ cách chia tập độc lập.
+- Crop mất hết lỗi mà vẫn giữ nhãn lỗi tạo label noise: input và label mâu thuẫn.
+- Biến đổi hình học phải đồng bộ với box/mask. Resize mask mã lớp thường dùng nearest-neighbor để không sinh mã lớp không hợp lệ.
+
+### Baseline và thí nghiệm
+
+Baseline là mốc so sánh có thể chạy và đánh giá lại. Khi thử cải tiến, ghi giả thuyết, cấu hình, split, seed, metric và tốc độ. Thay từng yếu tố giúp tìm nguyên nhân; các thay đổi có thể tương tác khi kết hợp.
+
+Mình đã phân tích tình huống F1 tăng từ 0,80 lên 0,81 nhưng inference chậm gấp ba. Cần xem precision/recall, FP/FN, loại lỗi được cải thiện, độ ổn định qua seed và yêu cầu latency/throughput, bộ nhớ.
+
+Chỗ mình cần sửa: ban đầu muốn xem test để quyết định thay baseline. Việc chọn model phải dựa vào validation và yêu cầu vận hành; test dành cho đánh giá cuối. Nếu tiếp tục chỉnh theo test thì tập đó không còn độc lập cho phiên bản sau.
+
+### Model, loss và training loop
+
+- Model tính đầu ra từ dữ liệu và tham số. Với mô hình tuyến tính nhị phân, `z = w*x + b` là logit; sigmoid chuyển logit thành score trong khoảng 0-1.
+- BCE phạt dự đoán sai tự tin mạnh hơn. `BCEWithLogitsLoss` nhận logits trực tiếp, không thêm sigmoid trước loss này.
+- `backward()` tính và lưu gradient; `optimizer.step()` mới cập nhật tham số. `zero_grad()` xóa gradient cũ vì PyTorch mặc định cộng dồn gradient.
+- `model.eval()` thay đổi hành vi các lớp như Dropout/BatchNorm, không tự tắt tính gradient.
+- Batch là nhóm mẫu; epoch là một lượt qua dữ liệu; step là lần cập nhật. Với 1.000 mẫu, batch 100 và một lần cập nhật mỗi batch: 10 step/epoch.
+- Loss batch có thể là trung bình loss các mẫu. Batch lớn hơn không mặc định tốt hơn và có thể cần chỉnh learning rate.
+- Shuffle trộn thứ tự, không tự cân bằng lớp. Gradient accumulation tích lũy qua nhiều batch trước khi step, cần điều chỉnh thang loss phù hợp.
+
+Buổi học dừng ở batch, epoch, shuffle và gradient accumulation. Phần tiếp theo sẽ tiếp tục nền tảng mô hình và CNN.
 
 ## Chạy bài
 
